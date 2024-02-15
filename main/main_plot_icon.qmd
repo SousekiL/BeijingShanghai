@@ -1,0 +1,2388 @@
+---
+title: "main_plot"
+format: html
+editor: visual
+---
+
+## ⭐️ 主要框架：
+
+根据人口密度+poi密度：
+
+### 一、北京城市更大：
+
+a\. 小尺度（步行方面）（chapter 2）
+
+1.  证据1: 北京vs上海，北京面积更大；娱乐场所数量更少、密度相差很大。
+
+    -   娱乐场所，便利店咖啡酒吧分布图和密度
+
+        -   [高德POI 01-1 购物消费、餐饮美食](#高德poi-01-1-购物消费餐饮美食)
+
+        -   [高德POI 01-2 密度图](#高德poi-01-2-密度图)
+
+    -   栅格图，横轴密度排序，纵轴密度
+
+        -   [高德POI 01-4 栅格分布](#高德poi-01-4-栅格分布)
+
+2.  证据2: 北京vs上海，北京公交地铁站的数量也少。
+
+    -   [高德POI 02-2 公交地铁](#高德poi-02-2-公交地铁)
+
+3.  证据3: 北京地铁1km范围内能到达的娱乐场所(咖啡酒吧电影院等)少。(doing
+
+    -   [高德POI 02-1 生活服务](#高德poi-02-1-生活服务)
+
+b\. 大尺度（驾驶）（chapter 2 & 3）
+
+1.  证据1: 北京人口密度分布差异较大？，人们可能需要跨城出行，路会很（直线距离上的远）
+    -   [人口密度01](#人口密度01)
+
+    -   [人口密度03 百分比趋势线](#人口密度03-百分比趋势线)
+
+    -   商业资源和人口分布的错配 [人口密度04 人口密度和商业资源的错配](#人口密度04-人口密度和商业资源的错配)
+2.  证据2: 北京的主要场所分布在老城区四周，集中在东三环附近（宏观驾驶视角：可能导致绕路）
+    -   [pending高德POI 01-3 只看高密度]
+3.  证据3: 是否真的需要绕路，用数据证明（大小尺度）
+
+### 二、北京社区更大
+
+c\. 原因：
+
+-   街区大 (pending
+
+-   路网密度低（chapter 4）
+
+    -   [poi路径抽样]
+
+    -   [从中心到边缘路网密度](#从中心到边缘路网密度)
+
+-   和其他城市的比较
+
+    -   [4个城市对比，中心到边缘](#个城市对比中心到边缘)
+
+    -   [4个城市对比](#个城市对比)
+
+## setup
+
+```{r setup, message=FALSE}
+#| echo: false
+knitr::opts_chunk$set(echo = TRUE)
+#setwd("~/Documents/R/BeijingShanghai/")
+knitr::opts_knit$set(root.dir = "~/Documents/R/BeijingShanghai")
+source("~/Documents/R/BeijingShanghai/main/data_etl.R")
+source("~/Documents/R/BeijingShanghai/main/_geom_flat_violin.R")
+# https://r-tmap.github.io/tmap-book/index.html
+library(tmap)
+library(magrittr)
+library(glue)
+library(ggthemes)  # for a mapping theme
+library(ggalt)  # for custom map projections
+library(ggrepel)  # for annotations
+#library(viridis)  # for nice colours
+```
+
+## 0. 基础地图数据
+
+```{r basemap, message=FALSE}
+#| echo: false
+map_base_bj <- tm_shape(bj_basemap2) +
+  tm_rgb(alpha = .4)
+map_base_sh <- tm_shape(sh_basemap2) +
+  tm_rgb(alpha = .4)
+# 环路
+city_circle <-
+  rbind(st_as_sf(data.frame(bj_circle, city = "北京")),
+        st_as_sf(data.frame(sh_circle, city = "上海")))
+
+# 城市范围
+city_circle3 <-
+  rbind(st_as_sf(data.frame(bj_circle3, city = "北京")),
+        st_as_sf(data.frame(sh_circle3, city = "上海")))
+
+# map_cirle <- tm_shape(city_circle) +
+#   tm_borders(lwd = 2, lty = 'twodash') +
+#   tm_facets(by = 'city')
+# map_cirle3 <- tm_shape(city_circle3) +
+#   tm_borders(alpha = 0) +
+#   tm_facets(by = 'city')
+
+# 城市排序
+city_circle$city %<>% factor(levels = c("北京", "上海"))
+city_circle3$city %<>% factor(levels = c("北京", "上海"))
+pop_dt %<>%
+  group_by(city) %>%
+  arrange(city, -population) %>%
+  mutate(city = factor(city, levels = c("北京", "上海")),
+         pop_rank = 1:n()) %>%
+           ungroup()
+poi_points_geo$city %<>% factor(levels = c("北京", "上海"))
+city_amap_sample_df$city %<>% factor(levels = c("北京", "上海"))
+dis_route_by_car$city %<>% factor(levels = c("北京", "上海"))
+dis_route_by_foot$city %<>% factor(levels = c("北京", "上海"))
+city_str_lines$city %<>% factor(levels = c("北京", "上海"))
+
+```
+
+```{r}
+# icon
+icon1 <- image_read('/Users/sousekilyu/Documents/R/BeijingShanghai/ICON/lyq_sign_slim.png') |>
+  image_crop(gravity = "center", geometry = "400x300") |>
+  image_scale("x250")
+icon2 <- image_read('/Users/sousekilyu/Documents/R/BeijingShanghai/ICON/lyq_icon2.png') |>
+  image_crop(gravity = "center", geometry = "800x600")
+#add icon
+add_icons_outside_line <- function(file) {
+  img <- image_read(glue('plot/icon_plot/{file}.png'))
+  white_icon <- image_blank(image_info(img)$width, 
+                          image_info(img)$height + 200, "white") |>
+  image_annotate("Data Source: AMAP, OSM. Graphic by ",
+                 gravity = "southwest",
+                 location = "+100+70",
+                 font = "Times",
+                 color = "gray30",
+                 size = 80) |> 
+  image_composite(icon1,
+                  gravity = "southwest",
+                  offset = "+1400-20",
+                  operator = "dissolve",
+                  compose_args="90%") 
+white_icon |> 
+  image_composite(img, gravity = "north") |>
+  image_composite(icon2,
+                  gravity = "center",
+                  offset = "+0+0",
+                  operator = "dissolve",
+                  compose_args="30%") |>
+  image_write(glue('plot/icon_plot/icon_{file}.png'))
+}
+
+```
+
+## 1. 城市范围
+
+```{r city scope, message=FALSE}
+#| echo: false
+tmap_mode("plot")
+name <- "Fig 3"
+title <- ". 主城区范围"
+tm <- tm_shape(bj_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(sh_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(city_circle) +
+  tm_borders(lwd = 3, lty = 'twodash', col = "gray90") +
+  tm_facets(by = 'city') +
+  tm_shape(city_circle3) +
+  tm_borders(alpha = 0) +
+  tm_facets(by = 'city') +
+  # tm_graticules(projection = 4326,
+  #         n.x = 5,
+  #         n.y = 5,
+  #         labels.size = 1,
+  #         lines = FALSE) +
+  # tm_graticules() +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 2.5,
+    legend.show = FALSE,
+    bg.color = "black"
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 2000,
+  height = 4000
+)
+
+add_icons_outside_line(name)
+```
+
+## 2. POI点
+
+### 高德POI 01-1 购物消费、餐饮美食 {#高德poi-01-1-购物消费餐饮美食}
+
+```{r poi density, message=FALSE, warning= FALSE}
+# 整体密度
+poi_points_geo_consume <- poi_points_geo %>%
+  filter(`大类` %in% c('购物消费', '餐饮美食', '休闲娱乐', '生活服务', '运动健身')) %>%
+  mutate(`大类` =  factor(`大类`, levels = c('购物消费', '餐饮美食', '休闲娱乐', '生活服务', '运动健身')))
+
+.bj_poi_geo_circle <- poi_points_geo_consume %>%
+  st_intersection(bj_circle)
+.sh_poi_geo_circle <- poi_points_geo_consume %>%
+  st_intersection(sh_circle)
+bj_area <- st_area(bj_circle)
+sh_area <- st_area(sh_circle)
+
+bj_poi_density <- (dim(.bj_poi_geo_circle)[1]) / as.numeric(bj_area/1000000)
+sh_poi_density <- (dim(.sh_poi_geo_circle)[1]) / as.numeric(sh_area/1000000)
+
+print(paste0(
+  "北京市五环内消费娱乐场所密度: ",
+      round(bj_poi_density, 0), "个/km\u00B2",
+  "; ",
+  "上海市外环内消费娱乐场所密度: ",
+      round(sh_poi_density, 0), "个/km\u00B2"
+))
+
+.poi_density_text <- rbind(
+  data.frame(
+    bj_centre,
+    poi_density = paste0(round(bj_poi_density, 0), " /km²"),
+    city = "北京"
+  ),
+  data.frame(
+    sh_centre,
+    poi_density = paste0(round(sh_poi_density, 0), " /km²"),
+    city = "上海"
+  )
+)  %>%
+  mutate(city = factor(city, levels = c("北京", "上海"))) %>%
+  st_as_sf()
+```
+
+```{r amap poi, message=FALSE}
+name <- "Fig 4"
+title <- ". 主城区商业资源分布"
+
+pal <- c("#fb8072", "#8dd3c7", "#ffffb3", "#bebada", "#80b1d3")
+lab <- c('购物消费', '餐饮美食', '休闲娱乐', '生活服务', '运动健身')
+
+tmap_mode("plot")
+tm <- 
+  tm_shape(bj_basemap2) +
+  tm_rgb(alpha = 0.2) +
+  tm_shape(sh_basemap2) +
+  tm_rgb(alpha = 0.2) +
+  tm_shape(city_circle) +
+  tm_borders(lwd = 3, lty = 'twodash', col = "gray60") +
+  tm_facets(by = 'city') +
+  tm_shape(city_circle3) +
+  tm_borders(alpha = 0) +
+  tm_facets(by = 'city') +
+  tm_shape(poi_points_geo_consume) +
+  tm_symbols(
+    col = "大类",
+    border.lwd = NA,
+    alpha = .3,
+    size = .005,
+    palette = pal,
+    legend.col.show = FALSE
+  ) +
+  tm_add_legend(type = "fill", 
+                col = pal, 
+                labels = lab,
+                title = "POI点") +
+  tm_facets(by = 'city') +
+  tm_shape(.poi_density_text[which(.poi_density_text$city == "北京"),]) +
+  tm_text("poi_density", col = "gray90", size = 2, 
+          just = "bottom", xmod = 9,  ymod = -16, 
+          fontfamily = "Times New Roman") +
+  tm_shape(.poi_density_text[which(.poi_density_text$city == "上海"),]) +
+  tm_text("poi_density", col = "gray90", size = 2, 
+          just = "bottom", xmod = 11,  ymod = -13.2, 
+          fontfamily = "Times New Roman") +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 3,
+    #legend.show = TRUE,
+    legend.title.size = 2,
+    legend.text.size = 2,
+    legend.outside = T,
+    legend.outside.position = "right",
+    legend.outside.size = .25,
+    bg.color = "black"
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 2500,
+  height = 4000
+)
+add_icons_outside_line(name)
+```
+
+### POI 01-2 密度图 {#高德poi-01-2-密度图}
+
+```{r poi density, message=FALSE, warning= FALSE}
+## clean
+.poi_points_geo_consume <- poi_points_geo_consume %>%
+  dplyr::mutate(poi_id = 1:dim(poi_points_geo_consume)[1]) %>%
+  dplyr::select(poi_id)
+.poi_dt_tmp <- pop_dt %>%
+  dplyr::mutate(poly_id = 1:dim(pop_dt)[1]) %>%
+  dplyr::select(city, poly_id, population)
+.freq <- st_intersection(x = .poi_dt_tmp, y = .poi_points_geo_consume) %>%
+  group_by(poly_id) %>%
+  dplyr::summarise(poi_sum = n_distinct(poi_id)) %>%
+  ungroup() %>%
+  st_drop_geometry()
+.poi_dt  <- .poi_dt_tmp %>%
+  left_join(.freq) %>%
+  mutate(poi_sum = if_else(is.na(poi_sum), 0, poi_sum))
+```
+
+```{r population density, message=FALSE}
+#| echo: false
+name <- "Fig 5"
+title <- ". 主城区商业资源栅格图"
+
+tmap_mode("plot")
+tm <- tm_shape(bj_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(sh_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(city_circle) +
+  tm_borders(lwd = 3, lty = 'twodash', col = "gray90") +
+  tm_facets(by = 'city') +
+  tm_shape(city_circle3) +
+  tm_borders(alpha = 0) +
+  tm_facets(by = 'city') +
+  # poi
+  tm_shape(.poi_dt) +
+  tm_polygons(
+    col = "poi_sum",
+    style = "cont",
+    alpha = .7,
+    palette = "YlGn",
+    title = "POI点数量",
+    legend.is.portrait = TRUE
+  ) +
+  tm_shape(.poi_density_text[which(.poi_density_text$city == "北京"),]) +
+  tm_text("poi_density", col = "gray90", size = 2, 
+          just = "bottom", xmod = 9,  ymod = -16, 
+          fontfamily = "Times New Roman") +
+  tm_shape(.poi_density_text[which(.poi_density_text$city == "上海"),]) +
+  tm_text("poi_density", col = "gray90", size = 2, 
+          just = "bottom", xmod = 11,  ymod = -13.2, 
+          fontfamily = "Times New Roman") +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 3,
+    #legend.show = TRUE,
+    legend.title.size = 2,
+    legend.text.size = 2,
+    legend.outside = T,
+    legend.outside.position = "right",
+    legend.outside.size = .25,
+    bg.color = "black"
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 2500,
+  height = 4000
+)
+add_icons_outside_line(name)
+
+```
+
+### pending高德POI 01-3 只看高密度
+
+```{r density, message=FALSE}
+# 只看高密度点
+#| echo: false
+name <- "Fig 6"
+title <- ". 城区主要商业资源"
+
+tmap_mode("plot")
+tm <- tm_shape(bj_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(sh_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(city_circle) +
+  tm_borders(lwd = 3, lty = 'twodash', col = "gray90") +
+  tm_facets(by = 'city') +
+  tm_shape(city_circle3) +
+  tm_borders(alpha = 0) +
+  tm_facets(by = 'city') +
+  tm_shape(.poi_dt[which(.poi_dt$poi_sum >= 500),]) +
+  tm_polygons(
+    col = "poi_sum",
+    style = "cont",
+    alpha = .7,
+    palette = "YlGn",
+    title = "POI点数量",
+    legend.is.portrait = TRUE
+  ) +
+  tm_shape(.poi_density_text[which(.poi_density_text$city == "北京"),]) +
+  tm_text("poi_density", col = "gray90", size = 2, 
+          just = "bottom", xmod = 9,  ymod = -16, 
+          fontfamily = "Times New Roman") +
+  tm_shape(.poi_density_text[which(.poi_density_text$city == "上海"),]) +
+  tm_text("poi_density", col = "gray90", size = 2, 
+          just = "bottom", xmod = 11,  ymod = -13.2, 
+          fontfamily = "Times New Roman") +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 3,
+    #legend.show = TRUE,
+    legend.title.size = 2,
+    legend.text.size = 2,
+    legend.outside = T,
+    legend.outside.position = "right",
+    legend.outside.size = .25,
+    bg.color = "black"
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 2500,
+  height = 4000
+)
+add_icons_outside_line(name)
+
+```
+
+### POI 01-4 栅格分布 {#高德poi-01-4-栅格分布}
+
+```{r population density, message=FALSE}
+#| echo: false
+name <- "Fig xx"
+title <- ". 城区主要商业资源密度栅格分布"
+
+.poi_dt_rank <- .poi_dt %>%
+  group_by(city) %>%
+  mutate(poi_area = st_area(geometry),
+         poi_density = round(poi_sum/as.numeric(poi_area)*1000000, 2),
+         pop_density = round(population/as.numeric(poi_area)*1000000, 2)) %>%
+  st_drop_geometry()  %>%
+  arrange(city, -poi_density) %>%
+  mutate(city = factor(city, levels = c("北京", "上海")),
+    poi_rank = 1:n()) %>%
+  dplyr::filter(as.numeric(poi_area) >= 500000)
+
+ggplot() +
+  geom_line(
+    data = .poi_dt_rank,
+    aes(
+      x = poi_rank,
+      y = poi_density,
+      color = city
+    ),
+    size = 2,
+    alpha = .8
+  ) +
+  geom_vline(xintercept=c(1, 100), linetype="dotted") +
+  geom_label_repel(
+    data = .poi_dt_rank[which(.poi_dt_rank$poi_rank %in% c(1, 500)),],
+    aes(
+      x = poi_rank,
+      y = poi_density,
+      label = round(poi_density, 0),
+      color = city
+    ),
+    family = 'Kai',
+    size = 9,
+    alpha = 0.8
+  ) +
+  scale_x_continuous(limits = c(1, 1000)) +
+  #scale_y_continuous(labels = scales::percent) +
+  #guides(color = FALSE) +
+  ggtitle(glue("\n{name}{title}")) +
+  labs(x = "\n栅格密度排序 (高 ---> 低)", y = "密度 (个/km²)\n") +
+  scale_colour_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  theme_bw() +
+  theme(
+    aspect.ratio = 5 / 8,
+    text = element_text(family = 'Kai'),
+    title = element_text(size = 30),
+    axis.text.x = element_text(size = 25),
+    axis.text.y = element_text(size = 25),
+    axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),
+    legend.title = element_text(size = 25),
+    legend.text = element_text(size = 25, margin = margin(t = 20))
+  )
+ggsave(
+  #tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 16,
+  height = 10
+)
+add_icons_outside_line(name)
+
+```
+
+### POI 02-1 生活服务 {#高德poi-02-1-生活服务}
+
+```{r poi density, message=FALSE, warning= FALSE}
+# 整体密度
+poi_points_geo_life <- poi_points_geo %>%
+  filter(`中类` %in% c('便利店', '超市', '咖啡', '酒吧', '电影院')) %>%
+  mutate(`中类` =  factor(`中类`, levels = c('便利店', '超市', '咖啡', '酒吧', '电影院')),
+         poi_id = 1:n())
+
+.bj_poi_geo_circle <- poi_points_geo_life %>%
+  st_intersection(bj_circle)
+.sh_poi_geo_circle <- poi_points_geo_life %>%
+  st_intersection(sh_circle)
+bj_area <- st_area(bj_circle)
+sh_area <- st_area(sh_circle)
+
+bj_poi_density2 <- (dim(.bj_poi_geo_circle)[1]) / as.numeric(bj_area/1000000)
+sh_poi_density2 <- (dim(.sh_poi_geo_circle)[1]) / as.numeric(sh_area/1000000)
+
+print(paste0(
+  "北京市五环内生活服务场所密度: ",
+      round(bj_poi_density2, 2), "个/km^2",
+  "; ",
+  "上海市外环内生活服务场所密度: ",
+      round(sh_poi_density2, 2), "个/km^2"
+))
+
+.poi_geo_life_density <- rbind(
+  data.frame(
+    .bj_poi_geo_circle %>%
+      st_drop_geometry() %>%
+      group_by(city, `中类`) %>%
+      summarise(poi_sum = n()),
+    area = as.numeric(bj_area)
+  ),
+  data.frame(
+    .sh_poi_geo_circle %>%
+      st_drop_geometry() %>%
+      group_by(city, `中类`) %>%
+      summarise(poi_sum = n()),
+    area = as.numeric(sh_area)
+  )
+) %>%
+  mutate(poi_density = paste0(format(round(
+    poi_sum / (area / 1000000), 2
+  ), nsmall = 2), " /km^2"),
+  poi_density_label = paste0(`中类`, ": ", poi_density)) %>%
+  dplyr::select(city, `中类`, poi_density, poi_density_label) 
+print(.poi_geo_life_density)
+
+## text label
+## text label
+.poi_density_text2 <- rbind(
+  data.frame(
+    bj_centre,
+    poi_density = paste(c(paste0(format(round(bj_poi_density2, 2), nsmall = 2), " /km^2"), .poi_geo_life_density[which(.poi_geo_life_density$city == "北京"),]$poi_density_label), collapse = "\n"),
+    city = "北京"
+  ),
+  data.frame(
+    sh_centre,
+    poi_density = paste(c(paste0(format(round(sh_poi_density2, 2), nsmall = 2), " /km^2"), .poi_geo_life_density[which(.poi_geo_life_density$city == "上海"),]$poi_density_label), collapse = "\n"),
+    city = "上海"
+  )
+)  %>%
+  mutate(city = factor(city, levels = c("北京", "上海"))) %>%
+  st_as_sf()
+
+```
+
+```{r amap poi, message=FALSE}
+name <- "Fig 2-5"
+title <- ". 城区主要生活服务POI点"
+
+pal <- c("#fb8072", "#8dd3c7", "#ffffb3", "#bebada", "#80b1d3")
+lab <- c('便利店', '超市', '咖啡', '酒吧', '电影院')
+
+tmap_mode("plot")
+tm <- 
+  tm_shape(bj_basemap2) +
+  tm_rgb(alpha = 0.2) +
+  tm_shape(sh_basemap2) +
+  tm_rgb(alpha = 0.2) +
+  tm_shape(city_circle) +
+  tm_borders(lwd = 3, lty = 'twodash', col = "gray60") +
+  tm_facets(by = 'city') +
+  tm_shape(city_circle3) +
+  tm_borders(alpha = 0) +
+  tm_facets(by = 'city') +
+  tm_shape(poi_points_geo_life) +
+  tm_symbols(
+    col = "中类",
+    border.lwd = NA,
+    alpha = .3,
+    size = .02,
+    palette = pal,
+    legend.col.show = FALSE
+  ) +
+  tm_add_legend(type = "fill", 
+                col = pal, 
+                labels = lab,
+                title = "POI点") +
+  tm_facets(by = 'city') +
+  tm_shape(.poi_density_text2[which(.poi_density_text2$city == "北京"),]) +
+  tm_text("poi_density", col = "gray90", size = 1.5, 
+          just = "right", 
+          xmod = 12.5,  ymod = -11, 
+          shadow = TRUE,
+          # bg.color = "black",
+          # bg.alpha = .5,
+          fontfamily = "Kai") +
+  tm_shape(.poi_density_text2[which(.poi_density_text2$city == "上海"),]) +
+  tm_text("poi_density", col = "gray90", size = 1.5, 
+          just = "right", 
+          xmod = 14.5,  ymod = -8.2, 
+          shadow = TRUE,
+          # bg.color = "black",
+          # bg.alpha = .5,
+          fontfamily = "Kai") +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 3,
+    #legend.show = TRUE,
+    legend.title.size = 2,
+    legend.text.size = 2,
+    legend.outside = T,
+    legend.outside.position = "right",
+    legend.outside.size = .25,
+    bg.color = "black"
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 2500,
+  height = 4000
+)
+add_icons_outside_line(name)
+
+```
+
+### POI 02-2 公交地铁 {#高德poi-02-2-公交地铁}
+
+```{r poi density, message=FALSE, warning= FALSE}
+# 整体密度
+poi_points_geo_trans <- poi_points_geo %>%
+  filter(`中类` %in% c('公交站', '地铁')) %>%
+  mutate(`中类` =  factor(`中类`, levels = c('公交站', '地铁')))
+
+.bj_poi_geo_circle <- poi_points_geo_trans %>%
+  st_intersection(bj_circle)
+.sh_poi_geo_circle <- poi_points_geo_trans %>%
+  st_intersection(sh_circle)
+bj_area <- st_area(bj_circle)
+sh_area <- st_area(sh_circle)
+
+bj_poi_density3 <- (dim(.bj_poi_geo_circle)[1]) / as.numeric(bj_area/1000000)
+sh_poi_density3 <- (dim(.sh_poi_geo_circle)[1]) / as.numeric(sh_area/1000000)
+
+print(paste0(
+  "北京市五环内公交站、地铁站密度: ",
+      round(bj_poi_density3, 2), "个/km\u00B2",
+  "; ",
+  "上海市外环内公交站、地铁站密度: ",
+      round(sh_poi_density3, 2), "个/km\u00B2"
+))
+
+.poi_density_text3 <- rbind(
+  data.frame(
+    bj_centre,
+    poi_density = paste0(format(round(bj_poi_density3, 2), nsmall = 2), " /km²"),
+    city = "北京"
+  ),
+  data.frame(
+    sh_centre,
+    poi_density = paste0(format(round(sh_poi_density3, 2), nsmall = 2), " /km²"),
+    city = "上海"
+  )
+)  %>%
+  mutate(city = factor(city, levels = c("北京", "上海"))) %>%
+  st_as_sf()
+```
+
+```{r amap poi, message=FALSE}
+name <- "Fig 7"
+title <- ". 城区公交站、地铁站分布"
+
+pal <- c("#fb8072", "#8dd3c7")
+lab <- c('公交站', '地铁')
+
+tmap_mode("plot")
+tm <- 
+  tm_shape(bj_basemap2) +
+  tm_rgb(alpha = 0.2) +
+  tm_shape(sh_basemap2) +
+  tm_rgb(alpha = 0.2) +
+  tm_shape(city_circle) +
+  tm_borders(lwd = 3, lty = 'twodash', col = "gray60") +
+  tm_facets(by = 'city') +
+  tm_shape(city_circle3) +
+  tm_borders(alpha = 0) +
+  tm_facets(by = 'city') +
+  tm_shape(poi_points_geo_trans) +
+  tm_symbols(
+    col = "中类",
+    border.lwd = NA,
+    alpha = .3,
+    size = .05,
+    palette = pal,
+    legend.col.show = FALSE
+  ) +
+  tm_add_legend(type = "fill", 
+                col = pal, 
+                labels = lab,
+                title = "公共交通站点") +
+  tm_facets(by = 'city') +
+  tm_shape(.poi_density_text3[which(.poi_density_text3$city == "北京"),]) +
+  tm_text("poi_density", col = "gray90", size = 2, 
+          just = "bottom", xmod = 9,  ymod = -16, 
+          fontfamily = "Times New Roman") +
+  tm_shape(.poi_density_text3[which(.poi_density_text3$city == "上海"),]) +
+  tm_text("poi_density", col = "gray90", size = 2, 
+          just = "bottom", xmod = 11,  ymod = -13.2, 
+          fontfamily = "Times New Roman") +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 3,
+    #legend.show = TRUE,
+    legend.title.size = 2,
+    legend.text.size = 2,
+    legend.outside = T,
+    legend.outside.position = "right",
+    legend.outside.size = .25,
+    bg.color = "black"
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 2500,
+  height = 4000
+)
+add_icons_outside_line(name)
+
+```
+
+### POI 02-3 地铁周围生活服务设施
+
+```{r metro, message=FALSE, warning= FALSE}
+poi_points_geo_metro <- poi_points_geo %>%
+  filter(`中类` %in% c('地铁')) %>%
+  dplyr::mutate(metro_id = 1:n(), metro_name = `名称`)
+poi_points_geo_metro_buffer_1km <- st_buffer(poi_points_geo_metro, 1000)
+poi_points_geo_metro_buffer_500m <- st_buffer(poi_points_geo_metro, 500)
+
+.poi_points_geo_life_metro_1km <- st_intersection(poi_points_geo_life, poi_points_geo_metro_buffer_1km) %>%
+  group_by(city, metro_id, metro_name) %>%
+  dplyr::summarise(poi_sum = n()) %>%
+  ungroup() %>%
+  st_drop_geometry() %>%
+  ######
+  filter(!metro_name %in% c("工人体育场", "陕西南路")) %>%
+  group_by(city) %>%
+  arrange(-poi_sum) %>%
+  mutate(rank = 1:n(),
+         #metro = str_replace_all(metro_name, "地铁站", ""),
+         metro = str_replace_all(metro_name, "JD", "京东"),
+         buffer = "1km") %>%
+  ungroup() 
+
+.poi_points_geo_life_metro_500m <- st_intersection(poi_points_geo_life, poi_points_geo_metro_buffer_500m) %>%
+  group_by(city, metro_id, metro_name) %>%
+  dplyr::summarise(poi_sum = n()) %>%
+  ungroup() %>%
+  st_drop_geometry() %>%
+  ######
+  filter(!metro_name %in% c("工人体育场", "陕西南路")) %>%
+  group_by(city) %>%
+  arrange(-poi_sum) %>%
+  mutate(rank = 1:n(),
+         #metro = str_replace_all(metro_name, "地铁站", ""),
+         metro = str_replace_all(metro_name, "JD", "京东"),
+         buffer = "500m") %>%
+  ungroup() 
+  
+.poi_points_geo_life_metro <- rbind(.poi_points_geo_life_metro_1km, .poi_points_geo_life_metro_500m)
+
+.poi_points_geo_life_metro %>%
+  group_by(city, buffer) %>%
+  summarise(poi_avg = format(mean(poi_sum), nsmall = 2))
+#.poi_points_geo_consume
+```
+
+```{r population density, message=FALSE}
+#| echo: false
+name <- "Fig 6"
+title <- ". 地铁站附近1km/500m生活服务设施数量"
+
+ggplot() +
+  geom_line(
+    data = .poi_points_geo_life_metro,
+    aes(
+      x = rank,
+      y = poi_sum,
+      color = city,
+      linetype = buffer
+    ),
+    size = 2,
+    alpha = .8
+  ) +
+  #geom_vline(xintercept=c(1, 100), linetype="dotted") +
+  geom_label_repel(
+    data = .poi_points_geo_life_metro[which(.poi_points_geo_life_metro$rank %in% c(1)),],
+    aes(
+      x = rank,
+      y = poi_sum,
+      label = paste0(metro, ": ", poi_sum, "个"),
+      color = city
+    ),
+    family = 'Kai',
+    size = 9,
+    alpha = 0.8
+  ) +
+  scale_x_continuous(limits = c(1, 1000)) +
+  geom_point(
+    data = .poi_points_geo_life_metro[which(.poi_points_geo_life_metro$rank %in% c(1)),],
+    aes(
+      x = rank,
+      y = poi_sum,
+      fill = city
+    ),
+    size = 5,
+    shape = 21
+  ) +
+  #scale_y_continuous(labels = scales::percent) +
+  guides(color = FALSE, linetype = FALSE) +
+  ggtitle(glue("\n{name}{title}")) +
+  labs(x = "\n地铁站附近1km/500m生活服务设施数量排序 (高 ---> 低)", y = "生活服务设施数量\n") +
+  scale_colour_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  scale_fill_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  facet_wrap(buffer ~., ncol = 1) +
+  theme_bw() +
+  theme(
+    aspect.ratio = 3 / 4,
+    text = element_text(family = 'Kai'),
+    title = element_text(size = 30),
+    strip.text = element_text(size = 25),
+    axis.text.x = element_text(size = 25),
+    axis.text.y = element_text(size = 25),
+    axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),
+    legend.title = element_text(size = 25),
+    legend.text = element_text(size = 25, margin = margin(t = 20))
+  )
+ggsave(
+  #tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 12,
+  height = 17
+)
+add_icons_outside_line(name)
+
+```
+
+## 3. 人口分布过散
+
+### 人口密度01 {#人口密度01}
+
+```{r population density, message=FALSE}
+#| echo: false
+name <- "Fig 8"
+title <- ". 主城区人口栅格图"
+
+tmap_mode("plot")
+tm <- tm_shape(bj_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(sh_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(city_circle) +
+  tm_borders(lwd = 3, lty = 'twodash', col = "gray90") +
+  tm_facets(by = 'city') +
+  tm_shape(city_circle3) +
+  tm_borders(alpha = 0) +
+  tm_facets(by = 'city') +
+  tm_shape(pop_dt) +
+  tm_polygons(
+    col = "population",
+    style = "cont",
+    alpha = .3,
+    #palette = "WhRd",
+    title = "人口数量",
+    legend.is.portrait = TRUE
+  ) +
+  #tm_facets(by = 'city') +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 2.5,
+    legend.show = TRUE,
+    legend.title.size = 2,
+    legend.text.size = 2,
+    legend.outside = T,
+    legend.outside.position = "right",
+    legend.outside.size = .25,
+    bg.color = "black"
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 2500,
+  height = 4000
+)
+add_icons_outside_line(name)
+
+```
+
+### 人口密度02 高密度地区
+
+```{r population density, message=FALSE, warning=FALSE}
+name <- "Fig 3-2"
+title <- ". 城区人口数量 (>= 20000)"
+
+tmap_mode("plot")
+tm <- tm_shape(bj_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(sh_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(city_circle) +
+  tm_borders(lwd = 3, lty = 'twodash', col = "gray90") +
+  tm_facets(by = 'city') +
+  tm_shape(city_circle3) +
+  tm_borders(alpha = 0) +
+  tm_facets(by = 'city') +
+  tm_shape(pop_dt[which(pop_dt$population >= 20000),]) +
+  #tm_shape(pop_dt[which(pop_dt$pop_rank <= 15),]) +
+  tm_polygons(
+    col = "population",
+    style = "cont",
+    alpha = .3,
+    #palette = "WhRd",
+    title = "人口数量",
+    legend.is.portrait = TRUE
+  ) +
+  #tm_facets(by = 'city') +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 2.5,
+    legend.show = TRUE,
+    legend.title.size = 2,
+    legend.text.size = 2,
+    legend.outside = T,
+    legend.outside.position = "right",
+    legend.outside.size = .25,
+    bg.color = "black"
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 2500,
+  height = 4000
+)
+add_icons_outside_line(name)
+
+```
+
+### 人口密度03 百分比趋势线 {#人口密度03-百分比趋势线}
+
+```{r population density, message=FALSE}
+#| echo: false
+#| source('~/Documents/R/BeijingShanghai/main/_cityCentre_population.R)
+name <- "Fig 9"
+title <- ". 主城区人口占比"
+
+bj_sh_pop_density <- readRDS('data/bj_sh_pop_density.rds') %>%
+  mutate(pop_rate = population / population_sum,
+         city = factor(city, levels = c("北京", "上海")),
+         marks = case_when(
+      city == "北京" & buffer == 1000 ~ "天安门广场",
+      city == "上海" & buffer == 1000 ~ "南京东路"
+    ))
+
+
+ggplot() +
+  geom_line(
+    data = bj_sh_pop_density,
+    aes(
+      x = buffer / 1000,
+      y = pop_rate,
+      color = city
+    ),
+    size = 2,
+    alpha = .8
+  ) +
+  geom_vline(xintercept=c(5, 10), linetype="dotted") +
+  geom_label_repel(
+    data = bj_sh_pop_density[which(bj_sh_pop_density$buffer %in% c(5000, 10000)),],
+    aes(
+      x = buffer / 1000 ,
+      y = pop_rate,
+      label = scales::percent(pop_rate),
+      color = city
+    ),
+    family = 'Kai',
+    size = 9
+  ) +
+    # 市中心
+  geom_label_repel(
+    data = bj_sh_pop_density[which(!is.na(bj_sh_pop_density$marks)), ],
+    aes(
+      x = buffer / 1000 ,
+      y = pop_rate,
+      label = marks,
+      color = city
+    ),
+    family = 'Kai',
+    size = 9,
+    alpha = 0.8
+  ) +
+  geom_point(
+    data = bj_sh_pop_density[which(!is.na(bj_sh_pop_density$marks)), ],
+    aes(
+      x = buffer / 1000,
+      y = pop_rate,
+      fill = city
+    ),
+    size = 5,
+    shape = 21
+  ) +
+  scale_x_continuous(limits = c(1, 25)) +
+  scale_y_continuous(labels = scales::percent) +
+  guides(color = FALSE) +
+  ggtitle(glue("\n{name}{title}")) +
+  labs(x = "\n市中心 ---> 郊区 (km)", y = "占城区总人口比例\n") +
+  scale_colour_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  scale_fill_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  theme_bw() +
+  theme(
+    aspect.ratio = 5 / 8,
+    text = element_text(family = 'Kai'),
+    title = element_text(size = 30),
+    axis.text.x = element_text(size = 25),
+    axis.text.y = element_text(size = 25),
+    axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),
+    legend.title = element_text(size = 25),
+    legend.text = element_text(size = 25, margin = margin(t = 20))
+  )
+ggsave(
+  #tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 16,
+  height = 10
+)
+add_icons_outside_line(name)
+
+```
+
+### 人口密度04 人口密度和商业资源的错配 {#人口密度04-人口密度和商业资源的错配}
+
+```{r}
+cor.test(.poi_dt_rank[which(.poi_dt_rank$city == "北京"),]$poi_sum,
+         .poi_dt_rank[which(.poi_dt_rank$city == "北京"),]$population,
+         alternative = c("two.sided"),
+         method = c("pearson")
+)
+
+cor.test(.poi_dt_rank[which(.poi_dt_rank$city == "上海"),]$poi_sum,
+         .poi_dt_rank[which(.poi_dt_rank$city == "上海"),]$population,
+         alternative = c("two.sided"),
+         method = c("pearson")
+)
+```
+
+```{r population density, message=FALSE, warning=FALSE}
+#| echo: false
+#| source('~/Documents/R/BeijingShanghai/main/_cityCentre_population.R)
+name <- "Fig 9"
+title <- ". 主城区商业资源和人口数量相关性"
+
+
+.poi_dt_rank2 <- .poi_dt_rank %>%
+  group_by(city) %>%
+  mutate(pop_density2 =  scales::rescale(pop_density, to = c(1, 100)),
+         poi_density2  =  scales::rescale(poi_density, to = c(1, 100))) 
+
+ggplot() +
+  geom_line(data = .poi_dt_rank2,
+    aes(
+      x = poi_rank,
+      y = poi_density2,
+      color = city
+    ),
+    size = 2,
+    alpha = .8
+  ) +
+  stat_smooth(data = .poi_dt_rank2,
+    aes(x = poi_rank, y = pop_density2,
+        color = city),
+    size = 1.5,
+    alpha = .8,
+    method = "lm",
+    formula = y ~ poly(x, 20),
+    se = FALSE,
+    linetype = "dashed"
+  ) +
+  annotate(geom="text", x=100, y=90, color="gray30", size = 8, hjust = 0, 
+           label="实线: 栅格的商业资源密度\n虚线: 对应栅格的人口密度 (平滑处理)",
+           family = 'Kai') +
+  annotate(geom = "rect", xmin = 1, xmax = 100, ymin =-Inf, ymax =Inf,
+            fill = "gray60", alpha = 0.2) +
+  scale_x_continuous(limits = c(1, 500)) +
+  #scale_y_continuous(labels = scales::percent) +
+  guides(color = FALSE) +
+  ggtitle(glue("\n{name}{title}")) +
+  labs(x = "\n商业资源栅格密度排序 (高 ---> 低)", y = "归一化的商业资源/人口密度\n") +
+  scale_colour_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  facet_wrap(city ~. , ncol = 1) +
+  theme_bw() +
+  theme(
+    aspect.ratio = 3 / 4,
+    text = element_text(family = 'Kai'),
+    title = element_text(size = 30),
+    strip.text = element_text(size = 25),
+    axis.text.x = element_text(size = 25),
+    axis.text.y = element_text(size = 25),
+    axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),
+    legend.title = element_text(size = 25),
+    legend.text = element_text(size = 25, margin = margin(t = 20))
+  )
+ggsave(
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 12,
+  height = 17
+)
+
+add_icons_outside_line(name)
+
+```
+
+## 4. 绕路情况
+
+### poi路径抽样
+
+```{r sampling, message=FALSE, warning=FALSE}
+#| echo: false
+name <- "Fig 13"
+title <- ". 主城区起讫点路线基于人口密度加权抽样 (n=10000)"
+tmap_mode("plot")
+tm <- tm_shape(bj_circle_highway) +
+  tm_lines(
+    col = "gray60",
+    alpha = 0.7,
+    lwd = 1
+  ) +
+  tm_shape(sh_circle_highway) +
+  tm_lines(
+    col = "gray60",
+    alpha = 0.7,
+    lwd = 1
+  ) +
+  tm_shape(city_circle) +
+  tm_borders(lwd = 3, lty = 'twodash', col = "gray90") +
+  tm_facets(by = 'city') +
+  tm_shape(city_circle3) +
+  tm_borders(alpha = 0) +
+  tm_facets(by = 'city') +
+  # 抽样路线
+  tm_shape(city_amap_sample_df_s) +
+  tm_symbols(col = "#EBB261",
+             border.lwd = NA,
+             alpha = .4,
+             size = .02) +
+  tm_add_legend(type = 'symbol', 
+                col =  "#EBB261",
+                labels =  "路线起讫点") +
+  #tm_facets(by = 'city') +
+  tm_shape(city_str_lines) +
+  tm_lines(col = "#9D5A6C",
+           alpha = .07,
+           size = .2) +
+  tm_add_legend(type = 'line', 
+                col =  "#9D5A6C",
+                lwd = 5,
+                labels =  "抽样路线") +
+  #tm_facets(by = 'city') +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 3,
+    legend.title.size = 2,
+    legend.text.size = 2,
+    legend.outside = T,
+    legend.outside.position = "right",
+    legend.outside.size = .15,
+    bg.color = "black"
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 4000,
+  height = 2200
+)
+add_icons_outside_line(name)
+
+```
+
+### data: 绕路 on foot
+
+```{r detour case on foot, message=FALSE}
+set.seed(1234)
+j = 15
+.dis_route_by <- dis_route_by_foot
+.detour_group_bj <-
+  .dis_route_by[which(.dis_route_by$dist_4326_km < 1.0 &
+                        .dis_route_by$detour_index > 1.5 &
+                        .dis_route_by$city == "北京"),]$group
+.detour_group_bj <-
+  .detour_group_bj[sample(1:length(.detour_group_bj), j, replace = FALSE)]
+.detour_group_sh <-
+  .dis_route_by[which(.dis_route_by$dist_4326_km < 1.0 &
+                        .dis_route_by$detour_index > 1.5 &
+                        .dis_route_by$city == "上海"),]$group
+.detour_group_sh <-
+  .detour_group_sh[sample(1:length(.detour_group_sh), j, replace = FALSE)]
+
+.dis_route_dt <-
+  .dis_route_by[which(.dis_route_by$group %in% c(.detour_group_bj, .detour_group_sh)),]
+.dis_route_dt %<>%
+  mutate(subtitle = paste0(
+    city,
+    ", ",
+    "直线: ",
+    round(dist_4326_km, 2),
+    "km, ",
+    "步行: ",
+    round(foot_dist, 2),
+    "km, ",
+    "绕路指数: ",
+    round(detour_index, 2)
+  ))
+.dis_route_dt_no <- .dis_route_dt %>%
+  st_drop_geometry() %>%
+  dplyr::select(group, city, subtitle)
+.city_str_lines <-
+  city_str_lines[which(city_str_lines$group %in% c(.detour_group_bj, .detour_group_sh)),] %>%
+  left_join(.dis_route_dt_no)
+.city_amap_sample_df <-
+  city_amap_sample_df[which(city_amap_sample_df$group %in% c(.detour_group_bj, .detour_group_sh)),] %>%
+  left_join(.dis_route_dt_no)
+```
+
+```{r detour case on foot, message=FALSE}
+name <- "Fig x"
+title <- ". 绕路指数 > 1.5 (on foot)"
+
+tm_lines <-   tm_shape(.city_str_lines) +
+  tm_lines(col = "#05403F",
+           lty = 'dashed',
+           lwd = 4) +
+  tm_facets(by = 'subtitle', ncol = 3) +
+  # 行车路线
+  tm_shape(.dis_route_dt, title="group") +
+  tm_lines(col = "#8C1F28",
+           lwd = 8) +
+  tm_facets(by = 'subtitle', ncol = 3) +
+  # tm_layout(
+  #   panel.labels = subtitle,
+  #   panel.label.size = 1
+  # ) +
+  # 点
+  tm_shape(.city_amap_sample_df) +
+  tm_symbols(col = "black",
+             size = 1) +
+  tm_facets(by = 'subtitle', ncol = 3) +
+  tm_text(
+    text = "名称",
+    size = 2,
+    bg.color = "#EBB261",
+    bg.alpha = .6,
+  ) +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    #panel.labels = .dis_route_dt$subtitle,
+    frame = T,
+    panel.label.size = 1,
+    legend.show = FALSE,
+    asp = 4/3
+  )
+
+tmap_mode("view")
+tm_view <- tm_basemap(server = c('OpenStreetMap'),
+                      alpha = .5) + tm_lines
+tm_view
+
+
+```
+
+### data: 绕路 by car
+
+```{r detour case on foot, message=FALSE}
+set.seed(1234)
+.dis_route_by <- dis_route_by_car
+ 
+.detour_group_bj <-
+  .dis_route_by[which(.dis_route_by$dist_4326_km > 10.0 &
+                        .dis_route_by$detour_index > 1.5 &
+                        .dis_route_by$city == "北京"),]$group
+.detour_group_bj <-
+  .detour_group_bj[sample(1:length(.detour_group_bj), j, replace = FALSE)]
+.detour_group_sh <-
+  .dis_route_by[which(.dis_route_by$dist_4326_km > 10.0 &
+                        .dis_route_by$detour_index > 1.5 &
+                        .dis_route_by$city == "上海"),]$group
+.detour_group_sh <-
+  .detour_group_sh[sample(1:length(.detour_group_sh), j, replace = FALSE)]
+
+.dis_route_dt <-
+  .dis_route_by[which(.dis_route_by$group %in% c(.detour_group_bj, .detour_group_sh)),]
+.dis_route_dt %<>%
+  mutate(subtitle = paste0(
+    city,
+    ", ",
+    "直线: ",
+    round(dist_4326_km, 2),
+    "km, ",
+    "行车: ",
+    round(car_dist, 2),
+    "km, ",
+    "绕路指数: ",
+    round(detour_index, 2)
+  ))
+.dis_route_dt_no <- .dis_route_dt %>%
+  st_drop_geometry() %>%
+  dplyr::select(group, city, subtitle)
+.city_str_lines <-
+  city_str_lines[which(city_str_lines$group %in% c(.detour_group_bj, .detour_group_sh)),] %>%
+  left_join(.dis_route_dt_no)
+.city_amap_sample_df <-
+  city_amap_sample_df[which(city_amap_sample_df$group %in% c(.detour_group_bj, .detour_group_sh)),] %>%
+  left_join(.dis_route_dt_no)
+```
+
+```{r detour case by car, message=FALSE}
+name <- "Fig x"
+title <- ". 绕路指数 > 1.5 (by car)"
+
+tm_lines <-   tm_shape(.city_str_lines) +
+  tm_lines(col = "#05403F",
+           lty = 'dashed',
+           lwd = 4) +
+  tm_facets(by = 'subtitle', ncol = 3) +
+  # 行车路线
+  tm_shape(.dis_route_dt, title="group") +
+  tm_lines(col = "#8C1F28",
+           lwd = 8) +
+  tm_facets(by = 'subtitle', ncol = 3) +
+  # tm_layout(
+  #   panel.labels = subtitle,
+  #   panel.label.size = 1
+  # ) +
+  # 点
+  tm_shape(.city_amap_sample_df) +
+  tm_symbols(col = "black",
+             size = 1) +
+  tm_facets(by = 'subtitle', ncol = 3) +
+  tm_text(
+    text = "名称",
+    size = 2,
+    bg.color = "#EBB261",
+    bg.alpha = .6,
+  ) +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    #panel.labels = .dis_route_dt$subtitle,
+    frame = T,
+    panel.label.size = 1,
+    legend.show = FALSE,
+    asp = 4/3
+  )
+
+tmap_mode("view")
+tm_view <- tm_basemap(server = c('OpenStreetMap'),
+                      alpha = .5) + tm_lines
+tm_view
+```
+
+### data: 绕路 by car 路线
+
+```{r detour case by car, message=FALSE}
+
+
+.dis_route_by <- dis_route_by_car
+.dis_route_by_index <- .dis_route_by %>%
+  mutate(index_by = if_else(detour_index >= 1.5, 1, 0)) %>%
+  dplyr::select(city, group, detour_index, index_by, dist_4326_km) %>%
+  st_drop_geometry()
+.city_str_lines <- city_str_lines %>%
+  left_join(.dis_route_by_index)
+
+
+name <- "Fig 6.2"
+title <- ". 绕路指数 > 1.5 (by car)"
+tmap_mode("plot")
+tm_lines <-  tm_shape(bj_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(sh_basemap2) +
+  tm_rgb(alpha = 0.5) +
+  tm_shape(city_circle) +
+  tm_borders(lwd = 3, lty = 'twodash') +
+  tm_facets(by = 'city') +
+  tm_shape(city_circle3) +
+  tm_borders(alpha = 0) +
+  tm_facets(by = 'city') +
+  tm_shape(.city_str_lines[which(.city_str_lines$dist_4326_km >= 10.0 &
+                                   .city_str_lines$detour_index < 1.5), ]) +
+  tm_lines(col = "#EBB261",
+           alpha = .01,
+           lwd = 1) +
+  tm_facets(by = 'city', ncol = 2) +
+  tm_shape(.city_str_lines[which(.city_str_lines$dist_4326_km >= 10.0 &
+                                   .city_str_lines$detour_index >= 1.5), ]) +
+  tm_lines(col = "#9D5A6C",
+           alpha = .1,
+           lwd = 2) +
+  tm_facets(by = 'city', ncol = 2) +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    #panel.labels = .dis_route_dt$subtitle,
+    frame = T,
+    panel.label.size = 3,
+    legend.show = FALSE,
+    asp = 4 / 3
+  )
+print(tm_lines)
+```
+
+### 绕路case
+
+```{r detour case by car, message=FALSE}
+tm_lines <-   tm_shape(.city_str_lines[which(.city_str_lines$city == "北京"),]) +
+  tm_lines(col = "#05403F",
+           lty = 'dashed',
+           lwd = 4) +
+  tm_facets(by = 'subtitle', ncol = 3) +
+  # 行车路线
+  tm_shape(.dis_route_dt[which(.dis_route_dt$city == "北京"),], title="group") +
+  tm_lines(col = "#8C1F28",
+           lwd = 8) +
+  tm_facets(by = 'subtitle', ncol = 3) +
+  # tm_layout(
+  #   panel.labels = subtitle,
+  #   panel.label.size = 1
+  # ) +
+  # 点
+  tm_shape(.city_amap_sample_df[which(.city_amap_sample_df$city == "北京"),]) +
+  tm_symbols(col = "black",
+             size = 1) +
+  tm_facets(by = 'subtitle', ncol = 3) +
+  tm_text(
+    text = "名称",
+    size = 2,
+    bg.color = "#EBB261",
+    bg.alpha = .6,
+  ) +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.5,
+    main.title.position = 0,
+    #panel.labels = .dis_route_dt$subtitle,
+    frame = T,
+    panel.label.size = 1,
+    legend.show = FALSE,
+    asp = 4/3
+  )
+
+tmap_mode("view")
+tm_view <- tm_basemap(server = c('OpenStreetMap'),
+                      alpha = .5) + tm_lines
+tm_view
+```
+
+### 绕路指数，直方图
+
+```{r}
+#> https://ourcodingclub.github.io/tutorials/dataviz-beautification/
+dis_route_by <- rbind(
+  dis_route_by_car %>%
+    mutate(
+      dist_group = case_when(
+        dist_4326_km > 15 ~ "15+km",
+        dist_4326_km > 10 ~ "10-15km",
+        dist_4326_km > 3 ~ "3-10km",
+        dist_4326_km <= 3 ~ "0-3km (on foot)"
+      )
+    ) %>%
+    dplyr::filter(dist_4326_km > 3) %>%
+    dplyr::select(group, car_dist, city, dist_group, detour_index) %>%
+    dplyr::rename("route_dist" = "car_dist"),
+  dis_route_by_foot %>%
+    mutate(
+      dist_group = case_when(
+        dist_4326_km > 15 ~ "15+km",
+        dist_4326_km > 10 ~ "10-15km",
+        dist_4326_km > 3 ~ "3-10km",
+        dist_4326_km <= 3 ~ "0-3km (on foot)"
+      )
+    ) %>%
+    dplyr::filter(dist_4326_km <= 3) %>%
+    dplyr::select(group, foot_dist, city, dist_group, detour_index) %>%
+    dplyr::rename("route_dist" = "foot_dist")
+)
+  
+dis_route_by$dist_group %<>% factor(levels = c("0-3km (on foot)", "3-10km", "10-15km", "15+km"))
+dis_route_by$city %<>% factor(levels = c("北京", "上海"))
+
+.detour_index_text <- dis_route_by %>%
+  st_drop_geometry() %>%
+  group_by(city) %>%
+  dplyr::summarise(avg = format(round(mean(detour_index, na.rm = TRUE),2), nsmall = 2))
+.detour_index_group_text <- dis_route_by %>%
+  st_drop_geometry() %>%
+  dplyr::group_by(city, dist_group) %>%
+  dplyr::summarise(avg = format(round(mean(detour_index, na.rm = TRUE),2), nsmall = 2))
+```
+
+```{r histgram, message=FALSE, warning=FALSE}
+name <- "Fig 14"
+title <- ". 主城区绕路指数"
+
+ggplot(data = dis_route_by,
+       aes(
+         x = reorder(city, desc(city)),
+         y = detour_index,
+         fill = city
+       )) +
+  # The half violins
+  geom_flat_violin(position = position_nudge(x = 0, y = 0), alpha = 0.8) +
+  # The points
+  geom_point(
+    aes(y = detour_index, color = city),
+    position = position_jitter(width = 0.15),
+    size = 1,
+    alpha = 0.1
+  ) +
+  annotate(geom="text", x=1.3, y=1.75, color="gray30", size = 12, hjust = 0, 
+           label=paste0("平均绕路指数: ", .detour_index_text[which(.detour_index_text$city == "上海"),]$avg),
+           family = 'Kai') +
+  annotate(geom="text", x=2.3, y=1.75, color="gray30", size = 12, hjust = 0, 
+           label=paste0("平均绕路指数: ", .detour_index_text[which(.detour_index_text$city == "北京"),]$avg),
+           family = 'Kai') +
+  annotate(geom="text", x=0.7, y=1.75, color="#9D5A6C", size = 12, hjust = 0, 
+           label=paste0("北京vs上海相对差异: ","+3.0%"),
+           family = 'Kai') +
+  # The boxplots
+  geom_boxplot(width = 0.2,
+               outlier.shape = NA,
+               alpha = 0.8) +
+  # \n adds a new line which creates some space between the axis and axis title
+  ggtitle(glue("\n{name}{title}")) +
+  labs(y = "\n绕路指数 (实际路线距离/直线距离)", x = NULL) +
+  # Removing legends
+  guides(fill = FALSE, color = FALSE) +
+  # Setting the limits of the y axis
+  scale_y_continuous(limits = c(1, 2.5)) +
+  coord_flip() +
+  #facet_wrap(. ~ dist_group) +
+  # Picking nicer colours
+  scale_fill_manual(values = c("#E47250",  "#5A4A6F", "#EBB261", "#9D5A6C")) +
+  scale_colour_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  theme(
+    aspect.ratio = 5 / 8,
+    text = element_text(family = 'Kai'),
+    title = element_text(size = 30),
+    strip.text = element_text(size = 30),
+    axis.text.x = element_text(size = 30),
+    axis.text.y = element_text(size = 30),
+    axis.title.x = element_text(size = 30)
+  )
+ggsave(
+  #tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 16,
+  height = 12
+)
+add_icons_outside_line(name)
+
+```
+
+```{r histgram, message=FALSE, warning=FALSE}
+name <- "Fig 15"
+title <- ". 主城区绕路指数 (不同距离段)"
+
+.tmp <- data.frame(
+  dist_group = c("0-3km (on foot)", "3-10km", "10-15km", "15+km"),
+  dif = c('+3.7%', '+3.6%', '+3.0%', '+2.3%'),
+  city = "上海"
+) %>%
+  mutate(dist_group = factor(dist_group, levels = c("0-3km (on foot)", "3-10km", "10-15km", "15+km")))
+ggplot(data = dis_route_by,
+       aes(
+         x = reorder(city, desc(city)),
+         y = detour_index,
+         fill = city
+       )) +
+  # The half violins
+  geom_flat_violin(position = position_nudge(x = 0, y = 0), alpha = 0.8) +
+  # The points
+  geom_point(
+    aes(y = detour_index, color = city),
+    position = position_jitter(width = 0.15),
+    size = 1,
+    alpha = 0.1
+  ) +
+  # The boxplots
+  geom_boxplot(width = 0.2,
+               outlier.shape = NA,
+               alpha = 0.8) +
+  geom_text(data = .detour_index_group_text[which(.detour_index_group_text$city == "北京"),],
+            aes(x=2.3, y=1.75, label = paste0("绕路指数: ", avg)),
+            color="gray30", size = 10, hjust = 0, family = 'Kai'
+            ) + 
+  geom_text(data = .detour_index_group_text[which(.detour_index_group_text$city == "上海"),],
+            aes(x=1.3, y=1.75, label = paste0("绕路指数: ", avg)),
+            color="gray30", size = 10, hjust = 0, family = 'Kai'
+            ) + 
+  geom_text(data = .tmp,
+            aes(x=0.7, y=1.75, label = paste0("北京vs上海: ", dif)),
+            color="#9D5A6C", size = 10, hjust = 0, family = 'Kai'
+            ) + 
+  ggtitle(glue("\n{name}{title}")) +
+  labs(y = "\n绕路指数 (实际路线距离/直线距离)", x = NULL) +
+  # Removing legends
+  guides(fill = FALSE, color = FALSE) +
+  # Setting the limits of the y axis
+  scale_y_continuous(limits = c(1, 2.5)) +
+  coord_flip() +
+  facet_wrap(. ~ dist_group) +
+  # Picking nicer colours
+  scale_fill_manual(values = c("#E47250",  "#5A4A6F", "#EBB261", "#9D5A6C")) +
+  scale_colour_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  theme(
+    aspect.ratio = 5 / 8,
+    text = element_text(family = 'Kai'),
+    title = element_text(size = 30),
+    strip.text = element_text(size = 30),
+    axis.text.x = element_text(size = 30),
+    axis.text.y = element_text(size = 30),
+    axis.title.x = element_text(size = 30)
+  )
+ggsave(
+  #tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 16,
+  height = 12
+)
+add_icons_outside_line(name)
+
+```
+
+## 5. 绕路：路网密度
+
+### data: 整体路网密度
+
+```{r histgram, message=FALSE, warning=FALSE}
+## 整体路网密度
+bj_area <- st_area(bj_circle)
+sh_area <- st_area(sh_circle)
+
+bj_highway_length <- bj_circle_highway %>%
+  dplyr::summarise() %>%
+  st_length()
+sh_highway_length <- sh_circle_highway %>%
+  dplyr::summarise() %>%
+  st_length()
+
+bj_highway_density <- (bj_highway_length/1000) / (bj_area/1000000)
+sh_highway_density <- (sh_highway_length/1000) / (sh_area/1000000)
+
+print(paste0(
+  "北京市五环内路网密度: ",
+      round(bj_highway_density, 2), "km/km\u00B2",
+  "上海市外环内路网密度: ",
+      round(sh_highway_density, 2), "km/km\u00B2"
+))
+```
+
+### 从中心到边缘路网密度 {#从中心到边缘路网密度}
+
+```{r histgram, message=FALSE, warning=FALSE}
+name <- "Fig 11"
+title <- ". 北京、上海城市路网密度对比"
+
+## 整体路网密度
+city_highway_density <- readRDS('data/bj_sh_highway_density.rds')
+city_highway_density %<>%
+  dplyr::filter(buffer >= 1000) %>%
+  mutate(
+    city = factor(city, levels = c("北京", "上海")),
+    marks = case_when(
+      city == "北京" & buffer == 1000 ~ "天安门广场",
+      city == "北京" & buffer == 5000 ~ "二环",
+      city == "北京" & buffer == 7000 ~ "三环",
+      city == "北京" & buffer == 9000 ~ "四环",
+      city == "北京" & buffer == 14000 ~ "五环",
+      city == "上海" & buffer == 1000 ~ "南京东路",
+      city == "上海" & buffer == 2500 ~ "南京西路",
+      city == "上海" & buffer == 7000 ~ "内环",
+      city == "上海" & buffer == 10000 ~ "中环",
+      city == "上海" & buffer == 14000 ~ "外环"
+    )
+  ) 
+
+ggplot() +
+  geom_line(
+    data = city_highway_density,
+    aes(
+      x = buffer / 1000,
+      y = as.numeric(density),
+      color = city
+    ),
+    size = 2,
+    alpha = .8
+  ) +
+  # 市中心
+  geom_label_repel(
+    data = city_highway_density[which(!is.na(city_highway_density$marks)), ],
+    aes(
+      x = buffer / 1000 ,
+      y = as.numeric(density),
+      label = paste0(marks, ": ", format(round(as.numeric(density), 2), nsmall = 2)),
+      color = city
+    ),
+    family = 'Kai',
+    size = 9,
+    alpha = 0.8
+  ) +
+  geom_point(
+    data = city_highway_density[which(!is.na(city_highway_density$marks)), ],
+    aes(
+      x = buffer / 1000,
+      y = as.numeric(density),
+      fill = city
+    ),
+    size = 5,
+    shape = 21
+  ) +
+  scale_x_continuous(limits = c(1, 20)) +
+  guides(color = FALSE) +
+  ggtitle(glue("\n{name}{title}")) +
+  labs(x = "\n市中心 ---> 郊区 (km)", y = expression("路网密度 （km/"~km^2~")","\n")) +
+  scale_fill_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  scale_colour_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  theme_bw() +
+  theme(
+    aspect.ratio = 5 / 8,
+    text = element_text(family = 'Kai'),
+    title = element_text(size = 30),
+    axis.text.x = element_text(size = 30),
+    axis.text.y = element_text(size = 30),
+    axis.title.x = element_text(size = 30),
+    axis.title.y = element_text(size = 30),
+    legend.title = element_text(size = 30),
+    legend.text = element_text(size = 30, margin = margin(t = 20))
+  )
+ggsave(
+  #tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 16,
+  height = 10
+)
+add_icons_outside_line(name)
+
+```
+
+###Appdx 1-2: 4个城市对比，中心到边缘 {#个城市对比中心到边缘}
+
+```{r histgram, message=FALSE, warning=FALSE}
+name <- "Appendix 1-2"
+title <- ". 城市路网密度对比"
+
+## 整体路网密度
+city4_highway_density <- readRDS('data/city4_highway_density.rds')
+city4_highway_density %<>%
+  mutate(city = factor(city, levels = c("北京", "上海", "天津", "杭州")),
+         marks = case_when(
+      city == "北京" & buffer == 1000 ~ "天安门广场",
+      city == "上海" & buffer == 1000 ~ "南京东路",
+      city == "天津" & buffer == 1000 ~ "滨江道",
+      city == "杭州" & buffer == 1000 ~ "武林广场"
+    ))
+    
+ggplot() +
+  geom_line(
+    data = city4_highway_density,
+    aes(
+      x = buffer / 1000,
+      y = as.numeric(density),
+      color = city
+    ),
+    size = 2,
+    alpha = .8
+  ) +
+   # 市中心
+  geom_label_repel(
+    data = city4_highway_density[which(city4_highway_density$buffer > 200 & !is.na(city4_highway_density$marks)), ],
+    aes(
+      x = buffer / 1000 ,
+      y = as.numeric(density),
+      label = marks,
+      color = city
+    ),
+    family = 'Kai',
+    size = 9,
+    alpha = 0.8
+  ) +
+  geom_point(
+    data = city4_highway_density[which(city4_highway_density$buffer > 200 & !is.na(city4_highway_density$marks)), ],
+    aes(
+      x = buffer / 1000,
+      y = as.numeric(density),
+      fill = city
+    ),
+    size = 5,
+    shape = 21
+  ) +
+  scale_x_continuous(limits = c(1, 20)) +
+  guides(color = FALSE) +
+  ggtitle(glue("\n{name}{title}")) +
+  labs(x = "\n市中心 ---> 郊区 (km)", y = expression("路网密度 （km/"~km^2~")","\n")) +
+  scale_fill_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  scale_colour_manual(values = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")) +
+  theme_bw() +
+  theme(
+    aspect.ratio = 5 / 8,
+    text = element_text(family = 'Kai'),
+    title = element_text(size = 30),
+    axis.text.x = element_text(size = 30),
+    axis.text.y = element_text(size = 30),
+    axis.title.x = element_text(size = 30),
+    axis.title.y = element_text(size = 30),
+    legend.title = element_text(size = 30),
+    legend.text = element_text(size = 30, margin = margin(t = 20))
+  )
+ggsave(
+  #tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 16,
+  height = 10
+)
+add_icons_outside_line(name)
+
+```
+
+### data: 4个城市对比，路网数据处理
+
+```{r histgram, message=FALSE, warning=FALSE}
+.centre <- rbind(
+  data.frame(bj_centre,
+             city = "天安门广场"),
+  data.frame(sh_centre,
+             city = "南京东路"),
+  data.frame(tj_centre,
+             city = "滨江道"),
+  data.frame(hz_centre,
+             city = "武林广场")
+) %>%
+  st_as_sf()
+# 5km 密度
+.centre_5km  <- .centre %>%
+  left_join(filter(dplyr::select(
+    mutate(
+      city4_highway_density,
+      density = paste0(format(round(as.numeric(density), 2), nsmall = 2), " ", "km/km²"),
+      city = case_when(
+        city == "北京" & buffer == 5000 ~ "天安门广场",
+        city == "上海" & buffer == 5000 ~ "南京东路",
+        city == "天津" & buffer == 5000 ~ "滨江道",
+        city == "杭州" & buffer == 5000 ~ "武林广场"
+      )
+    ),
+    city,
+    density
+  ),!is.na(city)))
+
+
+i = 1000
+.bj_centre_buffer <- st_buffer(bj_centre, i)
+.bj_centre_highway <-  bj_highway %>%
+  st_intersection(.bj_centre_buffer) %>%
+  dplyr::summarise()
+.sh_centre_buffer <- st_buffer(sh_centre, i)
+.sh_centre_highway <-  sh_highway %>%
+  st_intersection(.sh_centre_buffer) %>%
+  dplyr::summarise()
+.tj_centre_buffer <- st_buffer(tj_centre, i)
+.tj_centre_highway <-  tj_highway %>%
+  st_intersection(.tj_centre_buffer) %>%
+  dplyr::summarise()
+.hz_centre_buffer <- st_buffer(hz_centre, i)
+.hz_centre_highway <-  hz_highway %>%
+  st_intersection(.hz_centre_buffer) %>%
+  dplyr::summarise()
+.centre_buffer_1km <- rbind(
+  data.frame(.bj_centre_buffer,
+             city = "北京"),
+  data.frame(.sh_centre_buffer,
+             city = "上海"),
+  data.frame(.tj_centre_buffer,
+             city = "天津"),
+  data.frame(.hz_centre_buffer,
+             city = "杭州")
+)  %>%
+  mutate(city = factor(city, levels = c("北京", "上海", "天津", "杭州"))) %>%
+  st_as_sf()
+.centre_highway_1km <- rbind(
+  data.frame(.bj_centre_highway,
+             city = "北京"),
+  data.frame(.sh_centre_highway,
+             city = "上海"),
+  data.frame(.tj_centre_highway,
+             city = "天津"),
+  data.frame(.hz_centre_highway,
+             city = "杭州")
+)  %>%
+  mutate(city = factor(city, levels = c("北京", "上海", "天津", "杭州"))) %>%
+  st_as_sf()
+
+
+i = 5000
+.bj_centre_buffer <- st_buffer(bj_centre, i)
+.bj_centre_highway <-  bj_highway %>%
+  st_intersection(.bj_centre_buffer) %>%
+  dplyr::summarise()
+.sh_centre_buffer <- st_buffer(sh_centre, i)
+.sh_centre_highway <-  sh_highway %>%
+  st_intersection(.sh_centre_buffer) %>%
+  dplyr::summarise()
+.tj_centre_buffer <- st_buffer(tj_centre, i)
+.tj_centre_highway <-  tj_highway %>%
+  st_intersection(.tj_centre_buffer) %>%
+  dplyr::summarise()
+.hz_centre_buffer <- st_buffer(hz_centre, i)
+.hz_centre_highway <-  hz_highway %>%
+  st_intersection(.hz_centre_buffer) %>%
+  dplyr::summarise()
+.centre_buffer_3km <- rbind(
+  data.frame(.bj_centre_buffer,
+             city = "北京"),
+  data.frame(.sh_centre_buffer,
+             city = "上海"),
+  data.frame(.tj_centre_buffer,
+             city = "天津"),
+  data.frame(.hz_centre_buffer,
+             city = "杭州")
+)  %>%
+  mutate(city = factor(city, levels = c("北京", "上海", "天津", "杭州"))) %>%
+  st_as_sf()
+.centre_highway_3km <- rbind(
+  data.frame(.bj_centre_highway,
+             city = "北京"),
+  data.frame(.sh_centre_highway,
+             city = "上海"),
+  data.frame(.tj_centre_highway,
+             city = "天津"),
+  data.frame(.hz_centre_highway,
+             city = "杭州")
+) %>%
+  mutate(city = factor(city, levels = c("北京", "上海", "天津", "杭州"))) %>%
+  st_as_sf()
+
+
+```
+
+###Appdx 1-1: 4个城市对比 {#个城市对比}
+
+```{r histgram, message=FALSE, warning=FALSE}
+name <- "Appendix 1-1"
+title <- ". 市中心路网密度对比 (r = 5km)"
+
+tmap_mode("plot")
+tm <- # 5km
+  tm_shape(.centre_buffer_3km) +
+  tm_polygons(
+    col = NA,
+    alpha = 0,
+    border.col = "white",
+    legend.is.portrait = TRUE
+  ) +
+  tm_facets(by = 'city', ncol = 2)  +
+  tm_shape(.centre_highway_3km) +
+  tm_lines(
+    col = "gray60",
+    alpha = 0.7,
+    lwd = 1
+  ) +
+  # 1km
+  tm_shape(.centre_buffer_1km) +
+  tm_polygons(
+    col = NA,
+    alpha = 0,
+    border.col = "white",
+    legend.is.portrait = TRUE
+  ) +
+  tm_facets(by = 'city', ncol = 2)  +
+  tm_shape(.centre_highway_1km) +
+  tm_lines(
+    col = "city",
+    alpha = 0.7,
+    lwd = 1.5,
+    palette = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")
+  ) +
+  tm_shape(.centre_5km) +
+  tm_text("density", col = "gray80", size = 3, just = "bottom", ymod = -17.4, fontfamily = "Times New Roman") +
+  tm_shape(.centre_5km) +
+  tm_text("city", col = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C"), size = 2.3, just = "top", ymod = +17) +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.3,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 3,
+    legend.show = FALSE,
+    asp = 5 / 8,
+    bg.color = "black"
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 2500,
+  height = 4500
+)
+add_icons_outside_line(name)
+```
+
+### 2个城市对比 {#个城市对比}
+
+```{r histgram, message=FALSE, warning=FALSE}
+name <- "Fig extra"
+title <- ". 市中心路网密度对比 (r = 5km)"
+
+tmap_mode("plot")
+tm <- # 5km
+  tm_shape(.centre_buffer_3km[which(.centre_buffer_3km$city %in% c("北京", "上海")),]) +
+  tm_polygons(
+    col = NA,
+    alpha = 0,
+    border.col = "white",
+    legend.is.portrait = TRUE
+  ) +
+  tm_facets(by = 'city', ncol = 2)  +
+  tm_shape(.centre_highway_3km[which(.centre_highway_3km$city %in% c("北京", "上海")),]) +
+  tm_lines(
+    col = "gray60",
+    alpha = 0.7,
+    lwd = 1
+  ) +
+  # 1km
+  tm_shape(.centre_buffer_1km[which(.centre_buffer_1km$city %in% c("北京", "上海")),]) +
+  tm_polygons(
+    col = NA,
+    alpha = 0,
+    border.col = "white",
+    legend.is.portrait = TRUE
+  ) +
+  tm_facets(by = 'city', ncol = 2)  +
+  tm_shape(.centre_highway_1km[which(.centre_highway_1km$city %in% c("北京", "上海")),]) +
+  tm_lines(
+    col = "city",
+    alpha = 0.7,
+    lwd = 1.5,
+    palette = c("#E47250", "#5A4A6F",  "#EBB261", "#9D5A6C")
+  ) +
+  tm_shape(.centre_5km[which(.centre_5km$city %in% c("天安门广场", "南京东路")),]) +
+  tm_text("density", col = "gray80", size = 3, just = "bottom", ymod = -17.4, fontfamily = "Times New Roman") +
+  tm_shape(.centre_5km[which(.centre_5km$city %in% c("天安门广场", "南京东路")),]) +
+  tm_text("city", col = c("#E47250", "#5A4A6F"), size = 2.3, just = "top", ymod = +17) +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.3,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 3,
+    legend.show = FALSE,
+    asp = 5 / 8,
+    bg.color = "black"
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 3500,
+  height = 3000
+)
+add_icons_outside_line(name)
+```
+
+## 引子
+
+```{r}
+# poi
+amap_bj_poi_all <-
+  fread('/Users/sousekilyu/Documents/Meta Data/高德poi/2022高德poi/北京POI数据/北京市POI数据.csv') %>%
+  rename('lng' = '经度', 'lat' = '纬度') %>%
+  mutate(wgs_lng = gcj2wgs(lng, lat)$trans_lng,
+         wgs_lat = gcj2wgs(lng, lat)$trans_lat,) %>%
+  sf::st_as_sf(coords = c("wgs_lng", "wgs_lat"), crs = 4326) %>%
+  st_transform(crs = st_crs(bj_circle))
+
+amap_sh_poi_all <-
+  fread('/Users/sousekilyu/Documents/Meta Data/高德poi/2022高德poi/上海POI数据/上海市POI数据.csv') %>%
+  rename('lng' = '经度', 'lat' = '纬度') %>%
+  mutate(wgs_lng = gcj2wgs(lng, lat)$trans_lng,
+         wgs_lat = gcj2wgs(lng, lat)$trans_lat,) %>%
+  sf::st_as_sf(coords = c("wgs_lng", "wgs_lat"), crs = 4326) %>%
+  st_transform(crs = st_crs(sh_circle))
+
+poi_points_geo_all <- rbind(amap_bj_poi_all %>%
+                              mutate(city = "北京") ,
+                            amap_sh_poi_all %>%
+                              mutate(city = "上海"))
+poi_points_geo_life_all <- poi_points_geo_all %>%
+  filter(`中类` %in% c('便利店', '超市', '咖啡', '酒吧', '电影院')) %>%
+  mutate(`中类` =  factor(`中类`, levels = c('便利店', '超市', '咖啡', '酒吧', '电影院')),
+         poi_id = 1:n())
+poi_points_geo_life_enter <- poi_points_geo_all %>%
+  filter(`中类` %in% c('写字楼')) %>%
+  mutate(`中类` =  factor(`中类`, levels = c('写字楼')),
+         poi_id = 1:n())
+# # 国贸
+bj_live <- data.frame(city = "北京 (上地-马连洼北路)",
+                      geometry = st_sfc(st_point(
+                        c(
+                          gcj2wgs(116.302822, 40.032472)$trans_lng,
+                          gcj2wgs(116.302822, 40.032472)$trans_lat
+                        )
+                      ))) %>%
+  st_as_sf(crs = 4326) %>%
+  st_transform(crs = st_crs(bj_pop))
+
+# #
+sh_live <- data.frame(city = "上海 (新虹-天山西路)",
+                      geometry = st_sfc(st_point(
+                        c(
+                          gcj2wgs(121.305223, 31.212505)$trans_lng,
+                          gcj2wgs(121.305223, 31.212505)$trans_lat
+                        )
+                      ))) %>%
+  st_as_sf(crs = 4326) %>%
+  st_transform(crs = st_crs(sh_pop))
+
+.live_df <- st_as_sf(rbind(bj_live, sh_live))
+
+# buffer
+.live_df_1km <- st_buffer(.live_df, 3000)  %>%
+  mutate(city = factor(city, levels = c("北京 (上地-马连洼北路)", "上海 (新虹-天山西路)")))
+.live_df_core <- st_buffer(.live_df, 500)  %>%
+  mutate(city = factor(city, levels = c("北京 (上地-马连洼北路)", "上海 (新虹-天山西路)")))
+
+
+.bj_live_highway <-  bj_highway %>%
+  st_intersection(.live_df_1km[which(.live_df_1km$city == "北京 (上地-马连洼北路)"),]) %>%
+  dplyr::summarise()
+.sh_live_highway <-  sh_highway %>%
+  st_intersection(.live_df_1km[which(.live_df_1km$city == "上海 (新虹-天山西路)"),]) %>%
+  dplyr::summarise()
+.live_highway <- rbind(
+  data.frame(.bj_live_highway,
+             city = "北京 (上地-马连洼北路)"),
+  data.frame(.sh_live_highway,
+             city = "上海 (新虹-天山西路)")
+)  %>%
+  mutate(city = factor(city, levels = c("北京 (上地-马连洼北路)", "上海 (新虹-天山西路)"))) %>%
+  st_as_sf()
+
+.live_point_1km_life <-
+  st_intersection(poi_points_geo_life_all, .live_df_1km) %>%
+  mutate(city = factor(city, levels = c("北京 (上地-马连洼北路)", "上海 (新虹-天山西路)")))
+.live_point_1km_enter <-
+  st_intersection(poi_points_geo_life_enter, .live_df_1km) %>%
+  mutate(city = factor(city, levels = c("北京 (上地-马连洼北路)", "上海 (新虹-天山西路)")))
+```
+
+```{r}
+### plot
+pal <- c("#fb8072", "#8dd3c7", "#ffffb3", "#bebada", "#80b1d3")
+lab <- c('便利店', '超市', '咖啡', '酒吧', '电影院')
+
+### plot1
+name <- "Fig 1"
+title <- ". 上地-马连洼北路 vs 新虹-天山西路"
+tmap_mode("plot")
+tm <- # 3km
+  tm_shape(.live_df_1km) +
+  tm_polygons(col = NA,
+              alpha = 0,
+              border.col = "white") +
+  tm_facets(by = 'city', ncol = 1)  +
+  tm_shape(.live_df_core) +
+  tm_polygons(col = NA,
+              alpha = 0,
+              border.col = "white") +
+  tm_shape(.live_highway) +
+  tm_lines(col = "gray60",
+           alpha = 0.7,
+           lwd = 1) +
+  #tm_facets(by = 'city', ncol = 2)  +
+  tm_shape(.live_point_1km_life) +
+  tm_symbols(
+    col = "中类",
+    border.lwd = NA,
+    alpha = .5,
+    size = .2,
+    palette = pal,
+    legend.col.show = FALSE
+  ) +
+  tm_add_legend(type = "fill", 
+                col = pal, 
+                labels = lab,
+                title = "生活服务") +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.3,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 3,
+    legend.show = TRUE,
+    asp = 1 / 1,
+    bg.color = "black",
+    legend.title.size = 2,
+    legend.text.size = 2,
+    legend.outside = T,
+    legend.outside.position = "right",
+    legend.outside.size = .25
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 2500,
+  height = 4500
+)
+add_icons_outside_line(name)
+```
+
+```{r}
+
+### plot2
+pal <- c("#fb8072")
+lab <- c('写字楼')
+
+name <- "Fig 2"
+title <- ". 上地-马连洼北路 vs 新虹-天山西路"
+tmap_mode("plot")
+tm <- # 3km
+  tm_shape(.live_df_1km) +
+  tm_polygons(col = NA,
+              alpha = 0,
+              border.col = "white") +
+  tm_facets(by = 'city', ncol = 1)  +
+  tm_shape(.live_df_core) +
+  tm_polygons(col = NA,
+              alpha = 0,
+              border.col = "white") +
+  tm_shape(.live_highway) +
+  tm_lines(col = "gray60",
+           alpha = 0.7,
+           lwd = 1) +
+  #tm_facets(by = 'city', ncol = 2)  +
+  tm_shape(.live_point_1km_enter) +
+  tm_symbols(
+    col = "中类",
+    border.lwd = NA,
+    alpha = .5,
+    size = .2,
+    palette = pal,
+    legend.col.show = FALSE
+  ) +
+  tm_add_legend(type = "fill", 
+                col = pal, 
+                labels = lab,
+                title = "") +
+  tm_layout(
+    fontfamily = 'Kai',
+    main.title = glue('{name}{title}'),
+    main.title.size = 2.3,
+    main.title.position = 0,
+    frame = T,
+    panel.label.size = 3,
+    legend.show = TRUE,
+    asp = 1 / 1,
+    bg.color = "black",
+    legend.title.size = 2,
+    legend.text.size = 2,
+    legend.outside = T,
+    legend.outside.position = "right",
+    legend.outside.size = .25
+  )
+print(tm)
+tmap_save(
+  tm,
+  glue('plot/icon_plot/{name}.png'),
+  dpi = 300,
+  width = 2500,
+  height = 4500
+)
+add_icons_outside_line(name)
+```
